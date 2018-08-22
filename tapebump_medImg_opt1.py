@@ -88,10 +88,7 @@ def stamp_medImg(df, label_epoch, label_set):
             #
             # Running for ccds 1 to 25
             #
-            
-
-            for c in [33, 43, 7, 30, 32, 19, 14, 16, 41]:
-                #df['ccd'].unique()[:20:-1]:
+            for c in df['ccd'].unique():
                 dfx = df.loc[(df['band'] == b) & (df['s'] == tape) &
                              (df['ccd'] == c)]
 
