@@ -94,7 +94,7 @@ def main_aux(pathlist=None, ccd=None, coo=None, raw=None, extens=None,
         # Load the table, with no constraint on filetype, in case path
         # is extremely large
         dt = [('nite', 'i8'), ('expnum', 'i8'), ('band', '|S10'), 
-              ('exptime', 'f8'), ('path','|S200'),]
+              ('exptime', 'f8'), ('ccdnum' , 'i8'), ('path','|S200'),]
         tab = np.genfromtxt(
             pathlist,
             dtype=dt,
@@ -102,6 +102,12 @@ def main_aux(pathlist=None, ccd=None, coo=None, raw=None, extens=None,
             delimiter=',',
             missing_values=np.nan,
         )
+        #
+        # Filter by CCD. It already happened to me that the input list 
+        # contained more than the target CCD, and the generated results/stamps
+        # were erroneous
+        tab = tab[np.where(tab['ccdnum'] == ccd)]
+        #
     # Remove duplicates
     uarr, uidx, uinverse, ucounts= np.unique(
         tab['path'],
@@ -243,7 +249,13 @@ def fits_section(fname, coo, ext, raw):
     - ccd section array
     '''
     # fname, coo, ext, raw = x_list
-    x0, y0, x1, y1 = coo
+    # x0, y0, x1, y1 = coo
+    x0, x1, y0, y1 = coo
+    x0 -= 1
+    x1 -= 1
+    y0 -= 1
+    y1 -= 1
+    # logging.info('Transforming position to indices (starting at zero)')
     if os.path.exists(fname):
         fits = fitsio.FITS(fname)
         # sq = np.copy(fits[ext][y0:y1 , x0:x1])
@@ -289,16 +301,19 @@ if __name__ == '__main__':
     hgral += ' Normalized by exposure time. The output will be a table'
     hgral += ' with columns: mean,median,std,min,max,mad,rms,nite,expnum,'
     hgral += 'exptime,band,mjd'
-    ecl = argparse.ArgumentParser(description=hgral)
+    epil = 'MODIFIED VERSION, USES CCD COLUMN'
+    ecl = argparse.ArgumentParser(description=hgral, epilog=epil)
     h0 = 'Table of night, expnum, band, exptime, and path to images'
     h0 += ' for which stats should be calculated. Please use column names:'
-    h0 += ' nite, expnum, band, exptime, path.'
+    h0 += ' nite, expnum, band, exptime, ccdnum, path.'
     h0 += 'Format is CSV'
     ecl.add_argument('path', help=h0)
     h1 = 'CCD number on which operate'
     ecl.add_argument('--ccd', help=h1, type=int)
-    h2 = 'Coordinates of the section on which calculate statistics. Format:'
-    h2 += ' x0 y0 x1 y1'
+    h2 = 'Coordinates of the section on which calculate statistics.'
+    h2 += ' Coordinates values starting at 1, not at 0.'
+    h2 += ' Format: x0 x1 y0 y1. It includes the ending position.'
+    h2 += ' A unit is subtracted from the coords to convert them to indices'
     ecl.add_argument('--coo', help=h2, type=int, nargs=4)
     h3 = 'Flag. Use if inputs are raw image with overscan'
     ecl.add_argument('--raw', help=h2, action='store_true')
