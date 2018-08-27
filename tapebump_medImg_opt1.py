@@ -73,15 +73,21 @@ def stamp_medImg(df, label_epoch, label_set):
     # Receives the dataframe. Divide by band, then by tapebump, and then 
     # by ccd
     # Path were stamps are located
-    p = '/work/devel/fpazch/calib_space/Y5A1_tapebumps_check/stamps/'
-    df['fname'] = p + df['fname']
+    p = '/work/devel/fpazch/calib_space/Y5A1_tapebumps_check/stamps_a01/'
+    subdir = []
+    for idx, row in df.iterrows():
+        aux_path = os.path.join(p, row['band'], 'c{0:02}'.format(row['ccd']), 
+                                row['s'], row['fname'])
+        subdir.append(aux_path)
+    df['fname'] = subdir
     # Initialize pool
     P1 = mp.Pool(processes=mp.cpu_count())
-    for b in ['g', 'r', 'i', 'z', 'Y']: #df['band'].unique():
+    for b in ['g', 'r', 'i', 'z', 'Y', 'u']: #df['band'].unique():
         # List to save statistics
         aux_stat = []
         for tape in df['s'].unique():
-            logging.info('{0} {1} {2}'.format(b, tape, time.ctime()))
+            logging.info('{0} {1} {2} {3}'.format(b, tape, label_set, 
+                                                  time.ctime()))
             #
             # Change it for running all
             # for c in df['ccd'].unique():
@@ -104,9 +110,16 @@ def stamp_medImg(df, label_epoch, label_set):
                 # Create the median image
                 med_tmp = stat_cube(x3d_tmp, (lambda: np.median)()) 
                 # Write out median images
-                out = 'medImg_{0}_{1}_c{2:02}'.format(label_epoch, label_set, c)
+                aux_dir = 'medImg_a01/{0}/c{1:02}'.format(b, c)
+                if (not os.path.exists(aux_dir)):
+                    try:
+                        os.makedirs(aux_dir)
+                    except:
+                        raise
+                out = 'medImg_{0}_{1}_c{2:02}'.format(label_epoch, 
+                                                      label_set, c)
                 out += '_{0}_{1}.npy'.format(tape, b)
-                out =os.path.join('medImg/', out)
+                out = os.path.join(aux_dir, out)
                 np.save(out, med_tmp)
                 # Save statistics of the stamp
                 med_tmp = med_tmp.flatten()
