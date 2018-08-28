@@ -2,6 +2,23 @@
 Some remarks: 
 - I wll use the high sky brightness sample, as this are my work cases
 - The ,ask will be dilated, to not only comprise the tight region
+
+BPM definition of bits
+BPMDEF_FLAT_MIN     1
+BPMDEF_FLAT_MAX     2
+BPMDEF_FLAT_MASK    4
+BPMDEF_BIAS_HOT     8
+BPMDEF_BIAS_WARM   16
+BPMDEF_BIAS_MASK   32
+BPMDEF_BIAS_COL    64
+BPMDEF_EDGE       128
+BPMDEF_CORR       256
+BPMDEF_SUSPECT    512
+BPMDEF_FUNKY_COL 1024
+BPMDEF_WACKY_PIX 2048
+BPMDEF_BADAMP    4096
+BPMDEF_NEAREDGE  8192
+BPMDEF_TAPEBUMP 16384
 '''
 
 import os
@@ -53,64 +70,154 @@ def stamp_stats():
     '''
     return
 
-def gen_mask(fnm_arr, pix_border=10, sigma1=1, sigma2=10, dilat_n=10):
+def gen_mask(arr, pix_border=10, sigma1=1, sigma2=10, dilat_n=10):
     ''' Method to contruct the mask for the stamps. Check what happens when
     no mask is created (good sections)
     Inputs
-    - arr 
+    - arr: filename or array object
     - pix_border: how many pixels to discard at each stamp border, to avoid 
     strong slope
     - sigma1, sigma2
     - dilat_n: number of iterations for the dilation
     '''
-    arr = np.load(fnm_arr)
+    # TO mange both filename or array as input
+    if (type(arr) == np.ndarray):
+        pass
+    elif isinstance(arr, str):
+        arr = np.load(arr)
+    
+    if False:
+        plt.imshow(arr)
+        plt.show()
+        exit()
+
+    # arr = np.load(fnm_arr)
     # Discard the borders where some edge effects are presents
-    arr = arr[pix_border : -(pix_border - 1), pix_border : -(pix_border - 1)]
+    # arr = arr[pix_border : -(pix_border - 1), pix_border : -(pix_border - 1)]
+    
+    #
+    # How to restrict the Gaussian kernel to the non-masked values?
+    arr[np.ma.getmask(arr)] = 0#np.nan
+    if False:
+        plt.imshow(arr)
+        plt.show()
+        exit()
+
     # Apply a combined Gaussian kernel
     s1, s2 = 1, 10
     karr = (gauss_filter(arr, s1, order=0, mode='constant', cval=0) *
             gauss_filter(arr, s2, order=0, mode='constant', cval=0))
+    
+    # The Gaussian filter
+    
+    
+    
     # Over the kernelized image apply the Otsu threshold  
     val_otsu = otsu_threshold(karr)
     msk = karr > val_otsu
     print('Otsu={0:.3f} Std={1:.3f}'.format(val_otsu, np.std(karr)))
     # Dilate the mask 
-    d_msk = bin_dilation(msk, niter=10)
+    d_msk = bin_dilation(msk, niter=15)
     # After create the masks, check is need to discard small satellite masks
     #
-    # Checking cases
+    # Divide in 2 groups: easy and difficult
     #
     if (np.abs(val_otsu) > 1):
-        fig, ax = plt.subplots(1, 2)
-        im_norm = ImageNormalize(karr, 
-                                  interval=ZScaleInterval(),
-                                  stretch=SqrtStretch(),)
-        kw1 = {
-            'norm' : im_norm,
-            'origin' : 'lower',
-            'cmap' : 'gray_r',
-        }
-        ax[0].imshow(karr, **kw1)
-        ax[1].imshow(d_msk, origin='lower')
-        ax[1].imshow(msk, origin='lower', alpha=0.5)
-        plt.show()
+        if True:
+            fig, ax = plt.subplots(1, 2)
+            im_norm = ImageNormalize(karr, 
+                                      interval=ZScaleInterval(),
+                                      stretch=SqrtStretch(),)
+            kw1 = {
+                'norm' : im_norm,
+                'origin' : 'lower',
+                'cmap' : 'gray_r',
+            }
+            ax[0].imshow(karr, **kw1)
+            ax[1].imshow(d_msk, origin='lower')
+            ax[1].imshow(msk, origin='lower', alpha=0.5)
+            plt.show()
     #
     #
     return karr, d_msk
 
+def bit2decompose(k_int):
+    ''' Method receives an integer and split it in its base-2 composing bits
+    ''' 
+    base2 = []
+    z = 1
+    while (z <= k_int):
+        if (z & k_int):
+            base2.append(z)
+        # Shift bits to the left 1 place
+        z = z << 1
+    return base2
+
 def aux_main():
     path1 = 'medImg_a01/'
     path2 = 'medImg_a01_stat/'
+    path3 = 'mask_stamps/'
     # Multiprocessing
-    Px = mp.Pool(processes=mp.cpu_count())
+    # Px = mp.Pool(processes=mp.cpu_count())
+    
+    #
+    # Test on a special bad case: i-band, ccd 4, s3
+    #
+
+    # First of all, check the mask and the image. Remember is one mask per 
+    # ccd-band, based on the first exposure of the queue used to generate 
+    # the median image
+    b, ccd, sx= 'i', 4, 's3'
+    aux_path3 = os.path.join(path3, '{0}/c{1:02}/*_{2}_*'.format(b, ccd, sx))
+    
+    fnm1 = 'medImg_a01/i/c04/medImg_y4e1_a01b_c04_s3_i.npy'
+    fnm3 = glob.glob(aux_path3, recursive=True)
+    fnm3 = fnm3[0]
+    
+    # Open median image
+    mi_x = np.load(fnm1) 
+
+    # Open the mask and identify the different bits
+    msk_x = np.load(fnm3) 
+    aux_msk_x = map(bit2decompose, np.unique(msk_x.flatten()))
+    aux_msk_x = list(aux_msk_x)
+    # Dangerous bits
+    # Get the positions to be masked
+    dbits = [1, 128, 1024, 2048]
+    aux_msk = np.zeros_like(mi_x).astype('bool')
+    for bit in dbits:
+        aux_msk[np.where(bit & msk_x)] = True
+    # Create the masked version of the median image
+    # Works well when plotted
+    mi_masked = np.ma.masked_where(aux_msk, mi_x)
+    
+    # Feed the Otsu method with the masked array
+    tmp = gen_mask(mi_masked)
+    
+
+
+
+    # plt.imshow(mi_masked)
+    # plt.show()
+    exit()
+    
+    
+    # Flatten the 2 levels list
+    f_flat = lambda x: [i for sublist in x for i in sublist]
+    unique_msk_x = f_flat(aux_msk_x)
+    # Remove duplicates
+    unique_msk_x = np.unique(np.array(unique_msk_x))
+
+    exit()
+    
     # Iteratively work by band
     for b in ['g', 'r', 'i', 'z', 'Y']:
         #for ccd in np.r_[[1], np.arange(2, 60 + 1), [62]]:
-        
         t0 = time.time() 
         aux_path = os.path.join(path1, '{0}/c*/*npy'.format(b))
         fnm = glob.glob(aux_path, recursive=True)
         if False:
+            print('Multiprocessing')
             # Get the masks for each one of them
             res = Px.map_async(gen_mask, fnm)
             # Control of the pool
@@ -119,8 +226,8 @@ def aux_main():
             res = res.get()
         else:
             for f in fnm:
-                ccd, s = 
-                print('i')
+                # ccd, s = 
+                # print('i')
                 m = gen_mask(f)
         t1 = time.time()
         print('{0}-band, {1:.2f} min'.format(b, (t1 - t0) / 60))

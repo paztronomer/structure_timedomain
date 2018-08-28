@@ -10,9 +10,9 @@ from astropy.visualization import (MinMaxInterval, SqrtStretch,
                                    ImageNormalize, ZScaleInterval)
 
 
-def plot_grid(ccd, path='brute_analysis/medImg/', ep='y4e1', 
+def plot_grid(ccd, path='medImg_a01/', ep='y4e1', 
               sub=['a01a', 'a01b'], band='g', 
-              plotdir='brute_analysis/plot/'):
+              plotdir='plot_a01/'):
     
     fig = plt.figure(figsize=(10,6))
 
@@ -51,12 +51,13 @@ def plot_grid(ccd, path='brute_analysis/medImg/', ep='y4e1',
                        labelleft=False,)
     
     # Create filename list
+    # Filename set a
     f = 'medImg_{0}_{1}_c{2:02}_XXXX_{3}.npy'.format(ep, sub[0], 
                                                      ccd, band)
     f = os.path.join(path, f)
     sub_a_path = [f.replace('XXXX', i) 
                   for i in ['s1', 's2', 's3', 's4', 's5', 's6']]
-    #
+    # Filename set b
     g = 'medImg_{0}_{1}_c{2:02}_XXXX_{3}.npy'.format(ep, sub[1], 
                                                      ccd, band)
     g = os.path.join(path, g)
@@ -125,6 +126,10 @@ def plot_grid(ccd, path='brute_analysis/medImg/', ep='y4e1',
     plt.suptitle(txt, color='blue', fontsize=10, weight='semibold')
 
     plt.subplots_adjust(top=0.93, bottom=0.03)
+    
+    # Check if destination folder exists, if no exists, create it
+    if (not os.path.exists(plotdir)):
+        os.path
 
     # Write out the figure 
     outf = 'gridTape_{0}_c{1:02}_{2}.pdf'.format(ep, ccd, band)
@@ -141,6 +146,9 @@ if __name__ == '__main__':
 
     for b in ['g', 'r', 'i', 'z', 'Y']:
         for c in CCD:
-            print(c, b)
-            plot_grid(c, band=b, sub=['a01a', 'a01b'], ep='y4e1')
+            print(c,b)
+            aux_path = os.path.join('medImg_a01', b, 'c{0:02}'.format(c))
+            plot_path = os.path.join('plot_a01', b, 'c{0:02}'.format(c))
+            plot_grid(c, path=aux_path, plotdir=plot_path,
+                      band=b, sub=['a01a', 'a01b'], ep='y4e1')
 
