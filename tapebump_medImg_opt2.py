@@ -73,7 +73,7 @@ def stamp_medImg(df, label_epoch, label_set):
     # Receives the dataframe. Divide by band, then by tapebump, and then 
     # by ccd
     # Path were stamps are located
-    p = '/work/devel/fpazch/calib_space/Y5A1_tapebumps_check/stamps_a01/'
+    p = '/work/devel/fpazch/calib_space/Y5A1_tapebumps_check/test_stamps_a01/'
     subdir = []
     for idx, row in df.iterrows():
         aux_path = os.path.join(p, row['band'], 'c{0:02}'.format(row['ccd']), 
@@ -109,15 +109,29 @@ def stamp_medImg(df, label_epoch, label_set):
                 x3d_tmp = np.dstack(res)
                 # Create the median image
                 med_tmp = stat_cube(x3d_tmp, (lambda: np.median)()) 
+                # ======================================
+                # 
+                # With the generated median image, apply the masked pixels
+                # with a certain bit. Use the first image of the queue to 
+                # get the mask, as it should repeat
+                # 
+                # ======================================
+                # Get the mask from a single image
+                dfx['fname'].values[0]
+                # Which bits?
+
+                
+                
+                
                 # Write out median images
-                aux_dir = 'medImg_a01/{0}/c{1:02}'.format(b, c)
+                aux_dir = 'test_medImg_a01/{0}/c{1:02}'.format(b, c)
                 if (not os.path.exists(aux_dir)):
                     try:
                         os.makedirs(aux_dir)
                     except:
                         raise
-                out = 'medImg_{0}_{1}_c{2:02}'.format(label_epoch, 
-                                                      label_set, c)
+                out = 'test_medImg_{0}_{1}_c{2:02}'.format(label_epoch, 
+                                                           label_set, c)
                 out += '_{0}_{1}.npy'.format(tape, b)
                 out = os.path.join(aux_dir, out)
                 np.save(out, med_tmp)
@@ -133,9 +147,9 @@ def stamp_medImg(df, label_epoch, label_set):
                     np.ptp(med_tmp),]
                 )
         # Write out stats in CSV, per band
-        fnm_out = 'medImg_stat_{0}_{1}_{2}.csv'.format(label_epoch, 
-                                                       label_set, 
-                                                       b)
+        fnm_out = 'test_medImg_stat_{0}_{1}_{2}.csv'.format(label_epoch, 
+                                                            label_set, 
+                                                            b)
         dt = [('set', '|S15'), ('ccd', 'i8'), ('tape', '|S10'), 
               ('band', '|S5'), ('mean', 'f8'), ('median', 'f8'), 
               ('mad', 'f8'), ('rms', 'f8'), ('std', 'f8'), 
@@ -200,7 +214,7 @@ if __name__ == '__main__':
     # Cutvals for t_eff: 0.2 for g, Y; 0.3 for g, r, i, z
     band = a01['BAND'].unique()
     band = band[np.where(band != 'u')]
-    for b in a01['BAND'].unique():
+    for b in ['Y']: # a01['BAND'].unique():
         if (b in ['g', 'Y']):
             # Apply cut in t_eff. Define th2 2 subsets: above and below the 
             # cut value
