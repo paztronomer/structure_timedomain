@@ -5,6 +5,8 @@ Some remarks:
 '''
 
 import os
+import glob
+import time
 import numpy as np
 import scipy
 import scipy.ndimage
@@ -14,13 +16,11 @@ from astropy.visualization import (MinMaxInterval, SqrtStretch,
                                    ImageNormalize, ZScaleInterval)
 import skimage.filters
 import skimage.exposure
-
-
-def gaussian(mu, sigma, x):
-    return np.exp(np.power(-(x - mu), 2) / (2 * np.power(sigma, 2))) / (sigma * np.sqrt(2 * np.pi))
+from skimage import measure
+import multiprocessing as mp
 
 def gauss_filter(arr, sigma, order=0, mode='constant', cval=0):
-    '''
+    ''' Covolves with a Gaussian, with the given parameters
     - order: 0 for Gaussian; 1, 2, 3 for Gaussian derivates
     - mode: options are reflect, constatn, nearest, mirror, wrap
     - cval: value for pading when mode=constant is selected
@@ -30,37 +30,111 @@ def gauss_filter(arr, sigma, order=0, mode='constant', cval=0):
     )
     return gf
 
-def dilate():
-    ''' Dilation 
+def connected_reg(arr, threshold=0):
+    ''' Simple but useful method to get connected regions. Get all regions
+    and the subset above some threshold
     '''
-    from skimage import morphology
-    morphology.binary_dilation(a, morphology.diamond(1)).astype(np.uint8)
+    all_labels = measure.label(arr)
+    sub_labels = measure.label(blobs, background=threshold)
+    return all_labels, sub_labels
+
+def otsu_threshold(arr):
+    ''' Calculates the Otsu threshold value 
+    '''
+    return skimage.filters.threshold_otsu(arr)
+
+def bin_dilation(mask, niter=1):
+    ''' Binary dilation
+    '''
+    return scipy.ndimage.binary_dilation(mask, iterations=niter)
+
+def stamp_stats():
+    ''' Plot the simple stats generated from each one of the median images
+    '''
     return
 
-def connected_reg():
-    ''' Get connected regions
+def gen_mask(fnm_arr, pix_border=10, sigma1=1, sigma2=10, dilat_n=10):
+    ''' Method to contruct the mask for the stamps. Check what happens when
+    no mask is created (good sections)
+    Inputs
+    - arr 
+    - pix_border: how many pixels to discard at each stamp border, to avoid 
+    strong slope
+    - sigma1, sigma2
+    - dilat_n: number of iterations for the dilation
     '''
-    from skimage import measure
-    all_labels = measure.label(blobs)
-    blobs_labels = measure.label(blobs, background=0)
+    arr = np.load(fnm_arr)
+    # Discard the borders where some edge effects are presents
+    arr = arr[pix_border : -(pix_border - 1), pix_border : -(pix_border - 1)]
+    # Apply a combined Gaussian kernel
+    s1, s2 = 1, 10
+    karr = (gauss_filter(arr, s1, order=0, mode='constant', cval=0) *
+            gauss_filter(arr, s2, order=0, mode='constant', cval=0))
+    # Over the kernelized image apply the Otsu threshold  
+    val_otsu = otsu_threshold(karr)
+    msk = karr > val_otsu
+    print('Otsu={0:.3f} Std={1:.3f}'.format(val_otsu, np.std(karr)))
+    # Dilate the mask 
+    d_msk = bin_dilation(msk, niter=10)
+    # After create the masks, check is need to discard small satellite masks
+    #
+    # Checking cases
+    #
+    if (np.abs(val_otsu) > 1):
+        fig, ax = plt.subplots(1, 2)
+        im_norm = ImageNormalize(karr, 
+                                  interval=ZScaleInterval(),
+                                  stretch=SqrtStretch(),)
+        kw1 = {
+            'norm' : im_norm,
+            'origin' : 'lower',
+            'cmap' : 'gray_r',
+        }
+        ax[0].imshow(karr, **kw1)
+        ax[1].imshow(d_msk, origin='lower')
+        ax[1].imshow(msk, origin='lower', alpha=0.5)
+        plt.show()
+    #
+    #
+    return karr, d_msk
 
-def meth01(mx):
-    mx1 = gauss_filter(mx, 5, order=0) * gauss_filter(mx, 1, order=0)
-    return mx1
-
-def meth02(x):
-    # The Otsu thresholding work well with the image when: 
-    # K(sigma=5) * K(sigma=1)
-    # Try with other tapebumps to see if the good behaviour persists
-    aux_x = meth01(x)
-    val_x = skimage.filters.threshold_otsu(aux_x)
-    return aux_x < val_x
+def aux_main():
+    path1 = 'medImg_a01/'
+    path2 = 'medImg_a01_stat/'
+    # Multiprocessing
+    Px = mp.Pool(processes=mp.cpu_count())
+    # Iteratively work by band
+    for b in ['g', 'r', 'i', 'z', 'Y']:
+        #for ccd in np.r_[[1], np.arange(2, 60 + 1), [62]]:
+        
+        t0 = time.time() 
+        aux_path = os.path.join(path1, '{0}/c*/*npy'.format(b))
+        fnm = glob.glob(aux_path, recursive=True)
+        if False:
+            # Get the masks for each one of them
+            res = Px.map_async(gen_mask, fnm)
+            # Control of the pool
+            res.wait()
+            res.successful()
+            res = res.get()
+        else:
+            for f in fnm:
+                ccd, s = 
+                print('i')
+                m = gen_mask(f)
+        t1 = time.time()
+        print('{0}-band, {1:.2f} min'.format(b, (t1 - t0) / 60))
+    print ('---------')    
 
 if __name__ == '__main__':
-    fnm = 'brute_analysis/medImg/medImg_y4e1_a01b_c19_s1_g.npy'
-    mx = np.load(fnm)
+    
+    aux_main()
+    
+    """
+    fnm = 'medImg_a01/g/c19//medImg_y4e1_a01b_c19_s1_g.npy'
+    arr = np.load(fnm)
     # Discard the borders where some edge effects are presents
-    mx = mx[10 : -9, 10 : -9]
+    mx = arr[10 : -9, 10 : -9]
 
     # Image segmentation
     # IDEAS:
@@ -76,10 +150,16 @@ if __name__ == '__main__':
     #
 
     # Setup plot
-    fig, ax = plt.subplots(1, 5, figsize=(12, 3))
+    fig, ax = plt.subplots(1, 6, figsize=(12, 3))
+
+    #
+    # Sigma for the plots
+    #
+    sig1, sig2 = 5, 1
+    sig3, sig4 = 10, 1
 
     # Plot 1
-    mx1 = meth01(mx)
+    mx1 = meth01(mx, sig1, sig2)
     im_norm1 = ImageNormalize(mx1, 
                              interval=ZScaleInterval(),
                              stretch=SqrtStretch(),)
@@ -95,19 +175,63 @@ if __name__ == '__main__':
     cbar = fig.colorbar(im1, cax=cax)
     cbar.ax.tick_params(labelsize=9)
     cax.yaxis.set_ticks_position('right')
-    #
+    
     # Plot 2
-    mx2 = meth02(mx)
+    mx2 = meth01(mx, sig3, sig4)
+    im_norm2 = ImageNormalize(mx2, 
+                             interval=ZScaleInterval(),
+                             stretch=SqrtStretch(),)
     kw2 = {
+        'norm' : im_norm2,
+        'origin' : 'lower',
+        'cmap' : 'gray_r',
+    }
+    im2 = ax[1].imshow(mx2, **kw2)
+
+    # Plot 3
+    mx3, val3 = meth02(mx, sig1, sig2)
+    kw3 = {
         'origin' : 'lower',
         'cmap' : 'viridis',
     }
-    ax[1].imshow(mx2, **kw2)
-
-    # Plot 3 
-    # Histogram of the stamp
-    hist, bins_cntr = skimage.exposure.histogram(mx)
-    ax[2].plot(bins_cntr, hist, lw=0.8, c='goldenrod')
+    ax[2].imshow(mx3, **kw3)
+    # Dilate the mask
+    niter = 10
+    d_mx3 = scipy.ndimage.binary_dilation(mx3, iterations=niter)
+    ax[2].imshow(d_mx3, alpha=0.5, **kw3)
     
-    plt.show()
+    # Plot 4
+    mx4, val4 = meth02(mx, sig3, sig4)
+    kw4 = {
+        'origin' : 'lower',
+        'cmap' : 'viridis',
+    }
+    ax[3].imshow(mx4, **kw4)
+    # Dilate the mask
+    niter = 10
+    d_mx4 = scipy.ndimage.binary_dilation(mx4, iterations=niter)
+    ax[3].imshow(d_mx4, alpha=0.5, **kw4)
 
+    # Plot 5 
+    # Histogram of the stamp
+    we = np.ones_like(mx.flatten()) / mx.flatten().size
+    ax[4].hist(mx.flatten(), color='b', histtype='step', 
+                bins=100)
+    ax[4].axvline(val3, lw=2, color='navy')
+    ax[4].axvline(val4, lw=2, color='green')
+
+    # Plot 6
+    # Original stamp
+    arr_norm = ImageNormalize(arr, 
+                             interval=ZScaleInterval(),
+                             stretch=SqrtStretch(),)
+    kw1 = {
+        'norm' : arr_norm,
+        'origin' : 'lower',
+        'cmap' : 'gray_r',
+    }
+    im1 = ax[5].imshow(arr, **kw1)
+
+
+    plt.show()
+    """
