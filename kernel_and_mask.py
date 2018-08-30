@@ -120,7 +120,7 @@ def gen_mask(arr, mask, band=None, ccd=None, section=None,
     #
     # Check sets of median images 
     #
-    if ((np.abs(val_otsu) > 1) or force_plot):
+    if ((np.abs(val_otsu) <= 1) or force_plot):
         if True:
             tmp_karr = np.ma.masked_where(d_msk_otsu, karr)
             fig, ax = plt.subplots(1, 3)
@@ -160,6 +160,63 @@ def aux_main():
     path3 = 'mask_stamps/'
     # Multiprocessing
     # Px = mp.Pool(processes=mp.cpu_count())
+    #
+    # Iteratively work by the triplet of band-ccd-tape
+    bcs = [[x, y, z] for x in ['g', 'r', 'i', 'z', 'Y'] 
+           for y in np.r_[[1], np.arange(3, 60 + 1), [62]]
+           for z in ['s1', 's2', 's3', 's4', 's5', 's6']]
+    # Remove CCD31 tapebumps: s2, s3, s6
+    for b in ['g', 'r', 'i', 'z', 'Y']:
+        bcs.remove([b, 31, 's2'])
+        bcs.remove([b, 31, 's3'])
+        bcs.remove([b, 31, 's6'])
+    # 
+    for tri in bcs:
+        b, ccd, sx = tri
+        # b, ccd, sx = 'i', 38, 's1'
+        #    
+        # Construct the regex to look for immask masks, then get the unique 
+        # element
+        regx3 = '{0}/c{1:02}/*_{2}_*'.format(b, ccd, sx)
+        aux_path3 = os.path.join(path3, regx3)
+        logging.info('Regex to look for immask-mask: {0}'.format(aux_path3))
+        fnm3 = glob.glob(aux_path3, recursive=True)
+        if ((len(fnm3) > 1) or (len(fnm3) == 0)):
+            logging.error('Not an unique immask-mask was found')
+        else:
+            fnm3 = fnm3[0]
+        # Construct the regex to look for the median images 
+        regx1 = '{0}/c{1:02}/*a01b_c{1:02}_{2}_*'.format(b, ccd, sx)
+        aux_path1 = os.path.join(path1, regx1)
+        logging.info('Regex to look for median images: {0}'.format(aux_path1))
+        fnm1 = glob.glob(aux_path1, recursive=True)
+        if (len(fnm1) == 0):
+            logging.error('No median images found using {0}'.format(aux_path1))
+        # Open the immask-mask and identify the problematic bits. Map them
+        # and pass the mask to the mask generation method
+        immask_msk = np.load(fnm3)
+        #
+        # Unique bits, just for comparison
+        ubit = map(bit2decompose, np.unique(immask_msk.flatten()))
+        ubit = list(ubit)
+        #
+        dbits = [1, 2, 512, 1024, 2048]
+        # [1, 2, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192] 
+        aux_mask = np.zeros_like(immask_msk).astype('bool')
+        for bit in dbits:
+            aux_mask[np.where(bit & immask_msk)] = True
+        # Call all the median images iteratively, with an unique immask-mask
+        # for each set of band-ccd-tape 
+        for filex in fnm1:
+            # This call can be parallelizable once works without problems
+            ker_arr, dil_mask = gen_mask(filex, aux_mask, 
+                                         band=b, ccd=ccd, section=sx,
+                                         sigma1=1.5, sigma2=6,
+                                         dilat_n=12,
+                                         force_plot=False)    
+        
+
+    exit()
     
     if False:
         #
@@ -202,58 +259,6 @@ def aux_main():
         # Remove duplicates
         unique_msk_x = np.unique(np.array(unique_msk_x))
         exit()
-    
-    # Iteratively work by the triplet of band-ccd-tape
-    bcs = [[x, y, z] for x in ['g', 'r', 'i', 'z', 'Y'] 
-           for y in np.r_[[1], np.arange(3, 60 + 1), [62]]
-           for z in ['s1', 's2', 's3', 's4', 's5', 's6']]
-    for tri in bcs:
-        # b, ccd, sx = tri
-        b, ccd, sx = 'i', 38, 's1'
-        
-        # Construct the regex to look for immask masks, then get the unique 
-        # element
-        regx3 = '{0}/c{1:02}/*_{2}_*'.format(b, ccd, sx)
-        aux_path3 = os.path.join(path3, regx3)
-        logging.info('Regex to look for immask-mask: {0}'.format(aux_path3))
-        fnm3 = glob.glob(aux_path3, recursive=True)
-        if ((len(fnm3) > 1) or (len(fnm3) == 0)):
-            logging.error('Not an unique immask-mask was found')
-        else:
-            fnm3 = fnm3[0]
-        # Construct the regex to look for the median images 
-        regx1 = '{0}/c{1:02}/*a01b_c{1:02}_{2}_*'.format(b, ccd, sx)
-        aux_path1 = os.path.join(path1, regx1)
-        logging.info('Regex to look for median images: {0}'.format(aux_path1))
-        fnm1 = glob.glob(aux_path1, recursive=True)
-        if (len(fnm1) == 0):
-            logging.error('No median images found using {0}'.format(aux_path1))
-        # Open the immask-mask and identify the problematic bits. Map them
-        # and pass the mask to the mask generation method
-        immask_msk = np.load(fnm3)
-        #
-        #
-        ubit = map(bit2decompose, np.unique(immask_msk.flatten()))
-        ubit = list(ubit)
-        print(ubit)
-        #
-        #
-        dbits = [1, 2, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192] 
-        aux_mask = np.zeros_like(immask_msk).astype('bool')
-        for bit in dbits:
-            aux_mask[np.where(bit & immask_msk)] = True
-        # Call all the median images iteratively, with an unique immask-mask
-        # for each set of band-ccd-tape 
-        for filex in fnm1:
-            # This call can be parallelizable once works without problems
-            gen_mask(filex, aux_mask, band=b, ccd=ccd, section=sx,
-                     sigma1=1.5, sigma2=6,
-                     dilat_n=12,
-                     force_plot=True)    
-        
-        exit()
-
-    exit()
     
     # Open median image
     mi_x = np.load(fnm1) 
