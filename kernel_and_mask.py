@@ -101,9 +101,6 @@ def gen_mask(arr, mask, band=None, ccd=None, section=None,
         arr = np.load(arr)
     # Apply the mask
     arr = np.ma.masked_where(mask, arr)
-    # Discard the borders where some edge effects are presents
-    # arr = arr[pix_border : -(pix_border - 1), pix_border : -(pix_border - 1)]
-    #
     # NOTE: the Gaussian filter does not work with masked arrays. I need to
     # make zero the masked regions. NaN doesn't get a good result
     arr[np.ma.getmask(arr)] = 0
@@ -118,22 +115,6 @@ def gen_mask(arr, mask, band=None, ccd=None, section=None,
     rms = (np.sqrt(np.mean(np.square(karr.flatten()))))
     mad = np.median(np.abs(karr-np.median(karr)))
     msk_otsu1 = karr > 0.9 * val_otsu
-    #
-    # TEST FOR R-BAND
-    # After get a first threshold, get a second one, below the initial,
-    # to separate 'the holes' in the image, whicha re aldo part of the
-    # tapebumps
-    if False:
-        karr_tmp = np.copy(karr)
-        karr_tmp[msk_otsu] = val_otsu
-        val_otsu_tmp = otsu_threshold(karr_tmp)
-        print('Apply the mask for above and below both threshold values')
-        msk_otsu_tmp = karr_tmp < val_otsu_tmp
-        msk_otsu_dual = np.logical_or(msk_otsu, msk_otsu_tmp)
-        msk_otsu = msk_otsu_dual
-        #
-        #
-        #
     msk_otsu2 = karr > 0.8 * val_otsu
     msk_mad = karr > mad
     msk_rms = karr > 3 * rms
@@ -144,11 +125,6 @@ def gen_mask(arr, mask, band=None, ccd=None, section=None,
     d_msk_otsu2 = bin_dilation(msk_otsu2, niter=dilat_n)
     d_msk_mad = bin_dilation(msk_mad, niter=dilat_n)
     d_msk_rms = bin_dilation(msk_rms, niter=dilat_n)
-    # After create the masks, check is need to discard small satellite masks
-    #
-    # Divide in 2 groups: easy and difficult
-    #
-
     #
     # Check sets of median images
     #
@@ -260,73 +236,68 @@ def aux_main(write_tab=False):
     b_area = {'g': 0.9, 'r': 0.7, 'i': 0.7, 'z': 0.6, 'Y': 0.6}
     msk_info = []
     for tri in bcs:
-        # [['r', 50, 's5'], ['r', 51, 's3'], ['r', 60, 's5']]:
-        # [['g', 1, 's2'], ['g', 14, 's4'], ['g', 40, 's3'], ['g', 40, 's6']]:
         b, ccd, sx = tri
-        if True: #b == 'i':
-            # b, ccd, sx = 'i', 40, 's3'
-            #
-            # Construct the regex to look for immask masks, then get the unique
-            # element
-            regx3 = '{0}/c{1:02}/*_{2}_*'.format(b, ccd, sx)
-            aux_path3 = os.path.join(path3, regx3)
-            logging.info('Regex to look for immask-mask: {0}'.format(aux_path3))
-            fnm3 = glob.glob(aux_path3, recursive=True)
-            if ((len(fnm3) > 1) or (len(fnm3) == 0)):
-                logging.error('Not an unique immask-mask was found')
-            else:
-                fnm3 = fnm3[0]
-            # Construct the regex to look for the median images
-            regx1 = '{0}/c{1:02}/*a01b_c{1:02}_{2}_*'.format(b, ccd, sx)
-            aux_path1 = os.path.join(path1, regx1)
-            logging.info('Regex to look for med images: {0}'.format(aux_path1))
-            fnm1 = glob.glob(aux_path1, recursive=True)
-            if (len(fnm1) == 0):
-                logging.error('No med images found using {0}'.format(aux_path1))
-            # Open the immask-mask and identify the problematic bits. Map them
-            # and pass the mask to the mask generation method
-            immask_msk = np.load(fnm3)
-            #
-            # Unique bits, just for comparison
-            ubit = map(bit2decompose, np.unique(immask_msk.flatten()))
-            ubit = list(ubit)
-            #
-            dbits = [1, 2, 4, 8, 16, 32, 64, 128, 512, 1024, 2048]
-            # [1, 2, 512, 1024, 2048]
-            # [1, 2, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
-            aux_mask = np.zeros_like(immask_msk).astype('bool')
-            for bit in dbits:
-                aux_mask[np.where(bit & immask_msk)] = True
-            # Call all the median images iteratively, with an unique immask-msk
-            # for each set of band-ccd-tape
-            for filex in fnm1:
-                # This call can be parallelizable once works without problems
-                res_aux = gen_mask(
-                    filex, aux_mask,
-                    band=b, ccd=ccd, section=sx,
-                    sigma1=1.5, sigma2=6,
-                    max_area=b_area[b],
-                    min_otsu=b_otsu[b],
-                    dilat_n=10,
-                    do_plot=True,
-                )
-                # Split the results in the generated mask and the stats
-                msk_info.append(res_aux[1:])
-                # If selected, write out the mask in numpy binary format
-                area_x = res_aux[5]
-                otsu_x = res_aux[4]
-                criteria1 = area_x < b_area[b]
-                criteria2 = 0.9 * otsu_x > b_otsu[b]
-                if (criteria1 and criteria2):
-                    # Outname
-                    o = 'a01b_{0}_c{1:02}_{2}.npy'.format(b, ccd, sx)
-                    o = os.path.join(path4, o)
-                    if not os.path.exists(path4):
-                        raise
-                    # Write out the numpy mask
-                    x_msk = res_aux[0]
-                    np.save(o, x_msk)
-                    #
+        # Construct the regex to look for immask masks, then get the unique
+        # element
+        regx3 = '{0}/c{1:02}/*_{2}_*'.format(b, ccd, sx)
+        aux_path3 = os.path.join(path3, regx3)
+        logging.info('Regex to look for immask-mask: {0}'.format(aux_path3))
+        fnm3 = glob.glob(aux_path3, recursive=True)
+        if ((len(fnm3) > 1) or (len(fnm3) == 0)):
+            logging.error('Not an unique immask-mask was found')
+        else:
+            fnm3 = fnm3[0]
+        # Construct the regex to look for the median images
+        regx1 = '{0}/c{1:02}/*a01b_c{1:02}_{2}_*'.format(b, ccd, sx)
+        aux_path1 = os.path.join(path1, regx1)
+        logging.info('Regex to look for med images: {0}'.format(aux_path1))
+        fnm1 = glob.glob(aux_path1, recursive=True)
+        if (len(fnm1) == 0):
+            logging.error('No med images found using {0}'.format(aux_path1))
+        # Open the immask-mask and identify the problematic bits. Map them
+        # and pass the mask to the mask generation method
+        immask_msk = np.load(fnm3)
+        #
+        # Unique bits, just for comparison
+        ubit = map(bit2decompose, np.unique(immask_msk.flatten()))
+        ubit = list(ubit)
+        #
+        dbits = [1, 2, 4, 8, 16, 32, 64, 128, 512, 1024, 2048]
+        # [1, 2, 512, 1024, 2048]
+        # [1, 2, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+        aux_mask = np.zeros_like(immask_msk).astype('bool')
+        for bit in dbits:
+            aux_mask[np.where(bit & immask_msk)] = True
+        # Call all the median images iteratively, with an unique immask-msk
+        # for each set of band-ccd-tape
+        for filex in fnm1:
+            # This call can be parallelizable once works without problems
+            res_aux = gen_mask(
+                filex, aux_mask,
+                band=b, ccd=ccd, section=sx,
+                sigma1=1.5, sigma2=6,
+                max_area=b_area[b],
+                min_otsu=b_otsu[b],
+                dilat_n=10,
+                do_plot=True,
+            )
+            # Split the results in the generated mask and the stats
+            msk_info.append(res_aux[1:])
+            # If selected, write out the mask in numpy binary format
+            area_x = res_aux[5]
+            otsu_x = res_aux[4]
+            criteria1 = area_x < b_area[b]
+            criteria2 = 0.9 * otsu_x > b_otsu[b]
+            if (criteria1 and criteria2):
+                # Outname
+                o = 'a01b_{0}_c{1:02}_{2}.npy'.format(b, ccd, sx)
+                o = os.path.join(path4, o)
+                if not os.path.exists(path4):
+                    raise
+                # Write out the numpy mask
+                x_msk = res_aux[0]
+                np.save(o, x_msk)
+                #
     # Write out the results from the masking, one table per band
     # Each entry has: band, ccd, section, val_otsu, area, rms, mad
     df = pd.DataFrame(
@@ -341,104 +312,8 @@ def aux_main(write_tab=False):
     if write_tab:
         outres = 'otsu_masking.csv'
         df.to_csv(outres, index=False, header=True)
-
-    if False:
-        #
-        # Test on a special bad case: i-band, ccd 4, s3. Done! worked well
-        #
-        # First of all, check the mask and the image. Remember is one mask per
-        # ccd-band, based on the first exposure of the queue used to generate
-        # the median image
-        b, ccd, sx= 'i', 4, 's3'
-        aux_path3 = os.path.join(path3,
-                                 '{0}/c{1:02}/*_{2}_*'.format(b, ccd, sx))
-        #
-        fnm1 = 'medImg_a01/i/c04/medImg_y4e1_a01b_c04_s3_i.npy'
-        fnm3 = glob.glob(aux_path3, recursive=True)
-        fnm3 = fnm3[0]
-        #
-        # Open median image
-        mi_x = np.load(fnm1)
-        #
-        # Open the mask and identify the different bits
-        msk_x = np.load(fnm3)
-        aux_msk_x = map(bit2decompose, np.unique(msk_x.flatten()))
-        aux_msk_x = list(aux_msk_x)
-        # Dangerous bits
-        # Get the positions to be masked
-        dbits = [1, 128, 1024, 2048]
-        aux_msk = np.zeros_like(mi_x).astype('bool')
-        for bit in dbits:
-            aux_msk[np.where(bit & msk_x)] = True
-        # Create the masked version of the median image
-        # Works well when plotted
-        mi_masked = np.ma.masked_where(aux_msk, mi_x)
-        # Feed the Otsu method with the masked array
-        tmp = gen_mask(mi_masked)
-        #
-        exit()
-        # Flatten the 2 levels list
-        f_flat = lambda x: [i for sublist in x for i in sublist]
-        unique_msk_x = f_flat(aux_msk_x)
-        # Remove duplicates
-        unique_msk_x = np.unique(np.array(unique_msk_x))
-        exit()
-
-    if False:
-        exit()
-        # First of all, check the mask and the image. Remember is one mask per
-        # ccd-band, based on the first exposure of the queue used to generate
-        # the median image
-        b, ccd, sx= 'i', 4, 's3'
-        aux_path3 = os.path.join(path3, '{0}/c{1:02}/*_{2}_*'.format(b, ccd, sx))
-
-        fnm1 = 'medImg_a01/i/c04/medImg_y4e1_a01b_c04_s3_i.npy'
-        fnm3 = glob.glob(aux_path3, recursive=True)
-        fnm3 = fnm3[0]
-
-        # Open median image
-        mi_x = np.load(fnm1)
-
-        # Open the mask and identify the different bits
-        msk_x = np.load(fnm3)
-        aux_msk_x = map(bit2decompose, np.unique(msk_x.flatten()))
-        aux_msk_x = list(aux_msk_x)
-        # Dangerous bits
-        # Get the positions to be masked
-        dbits = [1, 128, 1024, 2048]
-        aux_msk = np.zeros_like(mi_x).astype('bool')
-        for bit in dbits:
-            aux_msk[np.where(bit & msk_x)] = True
-        # Create the masked version of the median image
-        # Works well when plotted
-        mi_masked = np.ma.masked_where(aux_msk, mi_x)
-
-        # Feed the Otsu method with the masked array
-        tmp = gen_mask(mi_masked)
-
-        exit()
-
-        # for ccd in np.r_[[1], np.arange(2, 60 + 1), [62]]:
-        t0 = time.time()
-        aux_path = os.path.join(path1, '{0}/c*/*npy'.format(b))
-        fnm = glob.glob(aux_path, recursive=True)
-        if False:
-            print('Multiprocessing')
-            # Get the masks for each one of them
-            res = Px.map_async(gen_mask, fnm)
-            # Control of the pool
-            res.wait()
-            res.successful()
-            res = res.get()
-        else:
-            for f in fnm:
-                # ccd, s =
-                # print('i')
-                m = gen_mask(f)
-        t1 = time.time()
-        print('{0}-band, {1:.2f} min'.format(b, (t1 - t0) / 60))
-        print ('---------')
-
+    
+    return True
 
 if __name__ == '__main__':
 
