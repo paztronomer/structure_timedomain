@@ -150,46 +150,46 @@ def ingest_mask(input_x):
     # Using the mask to identify the region on the BPM we want to mask
     # If the bit we want to use is already in some pixels of the region, we 
     # don't want to overwrite it
-    
-    print(reg_aux)
-    print(bpm.shape, reg_aux.shape)
-    # plt.imshow(reg_aux, origin='lower')
+    # For a more efficient implementation, first see if the bit to be used is
+    # in any of the target pixels. If so, then go one by one. If not, then
+    # do all of them at once
+    #
+    bit_a = bpm[np.where(masc)]
+    bit_a = np.unique(bit_a)
+    bit_a = list( map(bit_decompose, bit_a) )
+    bit_a = flatten_list(bit_a)
+    bit_a = list( set(bit_a) )
+    if bit2use in bit_a:
+        # Bit to be use for masking is between the ones composing the pixels 
+        # of the interest area
+        nz = np.nonzero(masc)
+        for idx in range(nz[0].size):
+            row, col = nz[0][idx], nz[1][idx]
+            # Go pixel by pixel detecting where the bit to be used lives
+            bit_pix = bit_decompose(bpm[row, col])
+            if (bit2use in bit_pix):
+                # Do not duplicate the bit, because it will be then assumed
+                # as 2*bit, thus leading to confussion
+                t_w = 'Bit showing in: ({0},{1}). CCD {2}'.format(row, col, c)
+                logging.warning(t_w)
+            else: 
+                bpm[row, col] += bit2use
+    else:
+        bpm[np.where(masc)] += bit2use
+    #
+    # Diagnosis plot
+    # tmp = np.copy(bpm)
+    # tmp[np.where(masc)] = -1000     
+    # plt.imshow(tmp, origin='lower')
     # plt.show()
-    exit()
+    #
+    return bpm
     
-    # Using the mask to identify the region on the BPM we want to mask
-    # If the bit we want to use is already in some pixels of the region, we 
-    # don't want to overwrite it
-    reg_aux = bpm[~np.ma.getmask(masc)]
-    #
-    # Check when I request only these pixels is not giving me others too
-    #
-    reg_aux = reg_aux.flatten()
-    print(reg_aux.shape, np.sum(np.ma.getmask(masc).astype(bool)))
-    # Get the bits composing the masked region
-    reg_bits = np.unique(reg_aux)
-    reg_bits = list(map(bit_decompose, reg_bits))
-    reg_bits = flatten_list(reg_bits)
-    # Check if the bit of interest is among the ones composing the region
-    if (bit2use in reg_bits):
-        logging.error('Not implemented')
-    # If the bit to be used for the new mask is not among the ones composing 
-    # the original region of the BPM, then we simply add this bit to each
-    # pixel value
-    bpm[~np.ma.getmask(masc)] += bit2use
-    #
-    # Check if that was properly changed
-    #
-    return (header, bpm)
-
-def aux_main():
+def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/',
+             path_bpm = 'bpm_Y4E1/', fix_dtype = True,
+             use_bit = 1, prefix = 'masked')
     # NOTE: the filename for each BPM is defined lines below, only changing
     # the CCD number
-    fnm_pos = 'Tapebump_Sections.txt'
-    path_msk = 'mask_products/'
-    path_bpm = 'bpm_Y4E1/'
-    fix_dtype = True
-    use_bit = 1
     # Warning message
     logging.warning('Setup needs to be updated/revised for new runs')
     #
@@ -252,49 +252,31 @@ def aux_main():
         # At this point we have loaded the BPM, and the mask for the CCD
         #
         xmod = ingest_mask([x, e, hdr, use_bit]) 
-
-        # Eval plot
-        # plt.imshow(e, origin='lower')
-        # plt.show()
-
-    exit()
-    x, hdr = open_fits(f['bpm'])
-    # We expect the FITS file to have only one extension
-    if ((len(x) > 1) or (len(hdr) > 1)):
-        t_w = 'FITS file {0} has more than 1 extension'.format(f['bpm'])
-        logging.warning(t_w)
-    # Get data from FITS
-    x = x[ext]
-    hdr = hdr[ext]
-    # Some BPMs were written with a bug: even when data is integer,
-    # the datatype was not. I need to fix it before do comparison
-    # against other integers (masks)
-    if fix_dtype:
-        x = x.astype('uint16') 
-    # Aux for naming
-    print(int(hdr['CCDNUM']))
-    # Write out the modified bitmasks 
-    for data in xnew:
-        ccdnum = int(data[0]['CCDNUM'])
-        fi_aux = df_aux.loc[df_aux['ccdnum'] == ccdnum, 'filename'].values[0]
-        if (prefix is None):
-            outnm = 'updated_' + fi_aux
-        else:
-            outnm = prefix + '_c{0:02}.fits'.format(ccdnum)
+        #
+        # Save the modified masks
+        #
+        outnm = prefix + '_c{0:02}.fits'.format(c)
         try:
             fits = fitsio.FITS(outnm, 'rw')
-            fits.write(data[1], header=data[0])
-            txt = 'fpazch updated bit definitions.'
-            txt += ' Original file {0}'.format(fi_aux)
-            hlist = [{'name' : 'comment', 'value' : txt},]
+            fits.write(xmod, header=hdr)
+            # Add comment
+            comm = 'fpazch added mask to regions in tapebumps.'
+            comm += ' Original file {0}'.format(os.path.basename(bpm_file))
+            hlist = [{
+                'name': 'comment',
+                'value': comm,
+            }]
             fits[-1].write_keys(hlist)
             fits.close()
-            t_i = 'FITS file written: {0}'.format(outnm)
+            logging.info('Masked BPM written: {0}'.format(outnm))
         except:
             t_e = sys.exc_info()[0]
             logging.error(t_e)
+        #
+        # Eval plot
+        # plt.imshow(e, origin='lower')
+        # plt.show()
     return True
-
 
 if __name__ == '__main__':
     t0 = time.time()
