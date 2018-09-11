@@ -170,7 +170,9 @@ def ingest_mask(input_x):
             if (bit2use in bit_pix):
                 # Do not duplicate the bit, because it will be then assumed
                 # as 2*bit, thus leading to confussion
-                t_w = 'Bit showing in: ({0},{1}). CCD {2}'.format(row, col, c)
+                t_w = 'Bit showing in: ({0},{1}). CCD {2}'.format(row, 
+                                                                  col, 
+                                                                  ccdnum)
                 logging.warning(t_w)
             else: 
                 bpm[row, col] += bit2use
@@ -178,16 +180,17 @@ def ingest_mask(input_x):
         bpm[np.where(masc)] += bit2use
     #
     # Diagnosis plot
-    # tmp = np.copy(bpm)
-    # tmp[np.where(masc)] = -1000     
-    # plt.imshow(tmp, origin='lower')
-    # plt.show()
+    tmp = np.copy(bpm)
+    tmp[np.where(~masc)] = 0
+    tmp[np.where(masc)] = 1
+    plt.imshow(tmp, origin='lower')
+    plt.show()
     #
     return bpm
     
-def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/',
+def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/refin/',
              path_bpm = 'bpm_Y4E1/', fix_dtype = True,
-             use_bit = 1, prefix = 'masked')
+             use_bit = 1, prefix = 'masked'):
     # NOTE: the filename for each BPM is defined lines below, only changing
     # the CCD number
     # Warning message
@@ -202,7 +205,7 @@ def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/',
     band = 'z'
     # Locate tapebumps masks and construct the total mask, using filename to
     # identify the section
-    regex1 = 'a01b_{0}_c*_*.npy'.format(band)
+    regex1 = 'refin_a01b_{0}_c*_*.npy'.format(band)
     regex1 = os.path.join(path_msk, regex1)
     ls1 = glob.glob(regex1, recursive=False)
     # Get list of CCDs for which masks are available  
@@ -227,6 +230,7 @@ def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/',
             c0, c1 = row['x1'].iloc[0] - 1, row['x2'].iloc[0] - 1
             # Ingest into the empty array
             e[r0:r1 + 1 , c0:c1 + 1] = m
+
         #
         # At this point we have the mask for the nth-CCD 
         #
@@ -256,6 +260,7 @@ def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/',
         # Save the modified masks
         #
         outnm = prefix + '_c{0:02}.fits'.format(c)
+        outnm = os.path.join('bpm_masked/', outnm)
         try:
             fits = fitsio.FITS(outnm, 'rw')
             fits.write(xmod, header=hdr)

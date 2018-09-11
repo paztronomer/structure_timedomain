@@ -199,7 +199,7 @@ def gen_mask(arr, mask, band=None, ccd=None, section=None,
             plt.savefig(outnm, dpi=300, format='pdf')
         except:
             raise
-        # plt.show()
+        plt.show()
     return d_msk_otsu1, band, ccd, section, val_otsu, area, rms, mad
 
 def bit2decompose(k_int):
@@ -213,21 +213,106 @@ def bit2decompose(k_int):
         # Shift bits to the left 1 place
         z = z << 1
     return base2
+                
+                
+                
+                
+                
+
+def refine_mask(outname=None,
+                info_tab='notes_otsu_masking.csv',
+                stamp=None, 
+                mask=None,
+                band=None, ccd=None, section=None,
+                sigma1=None, sigma2=None,
+                max_area=None,
+                min_otsu=None,
+                dilat_n=None,):
+    """
+             arr, mask, band=None, ccd=None, section=None,
+             min_otsu=None,
+             max_area=0.7,
+             pix_border=10, sigma1=1, sigma2=10, dilat_n=10,
+             do_plot=False):
+    """
+    # To mange both filename or array as input
+    if (type(stamp) == np.ndarray):
+        pass
+    elif isinstance(stamp, str):
+        arr = np.load(stamp)
+    # Apply the mask
+    arr = np.ma.masked_where(mask, arr)
+    # NOTE: the Gaussian filter does not work with masked arrays. I need to
+    # make zero the masked regions. NaN doesn't get a good result
+    arr[np.ma.getmask(arr)] = 0
+    # Apply a combined Gaussian kernel
+    karr = (gauss_filter(arr, sigma1, order=0, mode='constant', cval=0) *
+            gauss_filter(arr, sigma2, order=0, mode='constant', cval=0))
+    # Over the kernelized image apply the Otsu threshold and RMS
+    val_otsu = otsu_threshold(karr)
+    rms = (np.sqrt(np.mean(np.square(karr.flatten()))))
+    # Masks for 0.9 otsu and 3RMS
+    msk_otsu1 = karr > 0.9 * val_otsu
+    msk_rms = karr > 3 * rms
+    # Dilate the mask. These are the arrays to save 
+    d_msk_otsu1 = bin_dilation(msk_otsu1, niter=dilat_n)
+    d_msk_rms = bin_dilation(msk_rms, niter=dilat_n)
+    area = d_msk_otsu1[np.where(d_msk_otsu1)].size / karr.size
+    #
+    # Load the table of visual inspection results
+    #
+    df = pd.read_csv(info_tab)
+    # Fill NaN with False
+    df = df.fillna(False)
+    # For the actual band-ccd-section, write out (or not) the mask
+    df = df.loc[
+        (df['band'] == band) & (df['ccd'] == ccd) & (df['section'] == section)
+    ]
+    #
+    # Different cases
+    # NOTE: As True/False behaves as 1/0, I'm comparing against 1.5 to 
+    # not select booleans
+    print(df)
+    if ( (df['masked'].iloc[0]) and (not df['update'].iloc[0]) ):
+        # Save original mask
+        np.save(outname, d_msk_otsu1)
+        logging.info('1-Saved {0}'.format(os.path.basename(outname)))
+    elif ( (df['update'].iloc[0]) and ((df['x1'].iloc[0]) > 1.5) ):
+        # Set a rectangular mask
+        x1 , x2 = int(df['x1'].iloc[0]), int(df['x2'].iloc[0])
+        y1 , y2 = int(df['y1'].iloc[0]), int(df['y2'].iloc[0])
+        print(x1, x2, y1, y2)
+        rect_mask = np.zeros_like(karr).astype(bool)
+        rect_mask[y1 - 1:y2 , x1 - 1:x2 ] = True
+        # Dilate mask
+        d_rect_mask = bin_dilation(rect_mask, niter=dilat_n)
+        # Save rectangular mask
+        np.save(outname, d_rect_mask)
+        logging.info('2-Saved {0}'.format(os.path.basename(outname)))
+    elif ( (df['update'].iloc[0]) and (df['3rms'].iloc[0]) ): 
+        # Save 3RMS dilated mask
+        np.save(outname, d_msk_rms)
+        logging.info('3-Saved {0}'.format(os.path.basename(outname)))
+    elif ( (df['update'].iloc[0]) and (df['remove'].iloc[0]) ): 
+        pass
+        logging.warning('Mask was not saved because it was inaccurate')
+    return True
+
 
 def aux_main(write_tab=False):
     path1 = 'medImg_a01/'
     path2 = 'medImg_a01_stat/'
     path3 = 'mask_stamps/'
-    path4 = 'mask_products/'
+    path4 = 'mask_products/refin/'
     # Multiprocessing
     # Px = mp.Pool(processes=mp.cpu_count())
     #
     # Iteratively work by the triplet of band-ccd-tape
-    bcs = [[x, y, z] for x in ['g', 'r', 'i', 'z', 'Y']
+    bcs = [[x, y, z] for x in ['z'] #['g', 'r', 'i', 'z', 'Y']
            for y in np.r_[[1], np.arange(3, 60 + 1), [62]]
            for z in ['s1', 's2', 's3', 's4', 's5', 's6']]
     # Remove CCD31 tapebumps: s2, s3, s6
-    for b in ['g', 'r', 'i', 'z', 'Y']:
+    for b in ['z']: #['g', 'r', 'i', 'z', 'Y']:
         bcs.remove([b, 31, 's2'])
         bcs.remove([b, 31, 's3'])
         bcs.remove([b, 31, 's6'])
@@ -271,33 +356,52 @@ def aux_main(write_tab=False):
         # Call all the median images iteratively, with an unique immask-msk
         # for each set of band-ccd-tape
         for filex in fnm1:
-            # This call can be parallelizable once works without problems
-            res_aux = gen_mask(
-                filex, aux_mask,
+            if False:
+                # This call can be parallelizable once works without problems
+                res_aux = gen_mask(
+                    filex, aux_mask,
+                    band=b, ccd=ccd, section=sx,
+                    sigma1=1.5, sigma2=6,
+                    max_area=b_area[b],
+                    min_otsu=b_otsu[b],
+                    dilat_n=10,
+                    do_plot=False,
+                )
+                # Split the results in the generated mask and the stats
+                msk_info.append(res_aux[1:])
+                # If selected, write out the mask in numpy binary format
+                area_x = res_aux[5]
+                otsu_x = res_aux[4]
+                criteria1 = area_x < b_area[b]
+                criteria2 = 0.9 * otsu_x > b_otsu[b]
+                if (criteria1 and criteria2):
+                    # Outname
+                    o = 'a01b_{0}_c{1:02}_{2}.npy'.format(b, ccd, sx)
+                    o = os.path.join(path4, o)
+                    if not os.path.exists(path4):
+                        raise
+                    # Write out the numpy mask
+                    x_msk = res_aux[0]
+                    np.save(o, x_msk)
+                    #
+            #
+            # Below is the call for all z-band tapebumps, after the visual 
+            # inpection and tweaking of masking parameters
+            #
+            upd_outname = 'refin_a01b_{0}_c{1:02}_{2}.npy'.format(b, ccd, sx)
+            upd_outname = os.path.join(path4, upd_outname)
+            refine_mask(
+                outname=upd_outname,
+                info_tab='notes_otsu_masking.csv',
+                stamp=filex, 
+                mask=aux_mask,
                 band=b, ccd=ccd, section=sx,
                 sigma1=1.5, sigma2=6,
                 max_area=b_area[b],
                 min_otsu=b_otsu[b],
                 dilat_n=10,
-                do_plot=True,
             )
-            # Split the results in the generated mask and the stats
-            msk_info.append(res_aux[1:])
-            # If selected, write out the mask in numpy binary format
-            area_x = res_aux[5]
-            otsu_x = res_aux[4]
-            criteria1 = area_x < b_area[b]
-            criteria2 = 0.9 * otsu_x > b_otsu[b]
-            if (criteria1 and criteria2):
-                # Outname
-                o = 'a01b_{0}_c{1:02}_{2}.npy'.format(b, ccd, sx)
-                o = os.path.join(path4, o)
-                if not os.path.exists(path4):
-                    raise
-                # Write out the numpy mask
-                x_msk = res_aux[0]
-                np.save(o, x_msk)
-                #
+            
     # Write out the results from the masking, one table per band
     # Each entry has: band, ccd, section, val_otsu, area, rms, mad
     df = pd.DataFrame(
