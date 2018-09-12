@@ -180,17 +180,20 @@ def ingest_mask(input_x):
         bpm[np.where(masc)] += bit2use
     #
     # Diagnosis plot
-    tmp = np.copy(bpm)
-    tmp[np.where(~masc)] = 0
-    tmp[np.where(masc)] = 1
-    plt.imshow(tmp, origin='lower')
-    plt.show()
+    if False:
+        tmp = np.copy(bpm)
+        tmp[np.where(~masc)] = 0
+        tmp[np.where(masc)] = 1
+        plt.imshow(tmp, origin='lower')
+        plt.show()
     #
     return bpm
     
 def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/refin/',
              path_bpm = 'bpm_Y4E1/', fix_dtype = True,
              use_bit = 1, prefix = 'masked'):
+    # List for number of pixels for the masks
+    npix_msk = []
     # NOTE: the filename for each BPM is defined lines below, only changing
     # the CCD number
     # Warning message
@@ -230,11 +233,13 @@ def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/refin/',
             c0, c1 = row['x1'].iloc[0] - 1, row['x2'].iloc[0] - 1
             # Ingest into the empty array
             e[r0:r1 + 1 , c0:c1 + 1] = m
-
+        # Count number of tapebump masked pixels
+        npix_msk.append(e[np.where(e)].size)
+        print(e[np.where(e)].size, e.size)
         #
         # At this point we have the mask for the nth-CCD 
         #
-        # Load the nth-CCD mask
+        # Load the nth-CCD BPM
         bpm_file = 'D_n20160921t1003_c{0:02}_r2901p02_bpm.fits'.format(c)
         bpm_file = os.path.join(path_bpm, bpm_file)
         x, hdr = open_fits(bpm_file)
@@ -281,9 +286,10 @@ def aux_main(fnm_pos='Tapebump_Sections.txt', path_msk='mask_products/refin/',
         # Eval plot
         # plt.imshow(e, origin='lower')
         # plt.show()
-    return True
+    logging.info('N of tapebump masked pixels={0}'.format(np.sum(npix_msk)))
+    return npix_msk
 
 if __name__ == '__main__':
     t0 = time.time()
     NPROC = mp.cpu_count() - 1
-    aux_main()
+    npix = aux_main()
